@@ -1,0 +1,43 @@
+services:
+  logo-detection-backend:
+    build: ./logo_detection_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logo_detection_backend/uploads:/app/uploads
+      - ./logo_detection_backend/results:/app/results
+      - ./logo_detection_backend/temp:/app/temp
+    environment:
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  logo-detection-frontend:
+    build: 
+      context: ./logo_detection_frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    depends_on:
+      - logo-detection-backend
+    environment:
+      - API_URL=http://logo-detection-backend:8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for advanced queue management
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   restart: unless-stopped
