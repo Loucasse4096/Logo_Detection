@@ -1,6 +1,6 @@
 # Logo Detection System
 
-A complete logo detection system with FastAPI backend and Streamlit frontend, supporting multiple computer vision algorithms (SIFT, ORB, BRISK, SURF, AKAZE).
+A complete logo detection system with FastAPI backend and Streamlit frontend, supporting multiple computer vision algorithms (SIFT, ORB, Color-based, Edge-based, Hybrid).
 
 ## 🚀 Quick Start
 
@@ -116,7 +116,7 @@ senior_ai_engineer_assignment/
 ### Logo Detection
 - **`POST /detect`** - Detect logo in video
   - Parameters: `video` (file), `logo` (file), `detector` (string)
-  - Available detectors: `sift`, `orb`, `brisk`, `surf`, `akaze`
+  - Available detectors: `sift`, `orb`, `color_based`, `edge_based`, `hybrid`
 
 ### Job Management
 - **`GET /status/{job_id}`** - Get job status
@@ -131,15 +131,46 @@ senior_ai_engineer_assignment/
 
 ## 🎯 Available Detectors
 
-| Detector | Speed | Robustness |
-|----------|-------|------------|
-| **ORB** | Fast | Rotation, Scale |
-| **SIFT** | Moderate | Rotation, Scale, Illumination |
-| **BRISK** | Fast | Rotation, Scale |
-| **SURF** | Moderate | Rotation, Scale, Illumination |
-| **AKAZE** | Moderate | Rotation, Scale |
+| Detector | Speed | Best For | Robustness |
+|----------|-------|----------|------------|
+| **SIFT** | Moderate | High accuracy with structural validation | Rotation, Scale, Illumination |
+| **ORB** | Fast | Real-time detection | Rotation, Scale |
+| **Color-based** | Fast | Distinctive logo colors | Textured backgrounds, Illumination |
+| **Edge-based** | Fast | Contour detection | Textured backgrounds, Scale |
+| **Hybrid** | Moderate | Maximum accuracy on complex backgrounds | Textured backgrounds, Scale, Rotation, Illumination |
 
-**Recommended:** ORB for best performance/accuracy balance.
+**Recommended:** 
+- **Hybrid** for textured/complex backgrounds (combines color + edge detection)
+- **SIFT** for high accuracy with brand guideline validation
+- **ORB** for real-time performance
+
+### Detector Details
+
+**SIFT (Scale-Invariant Feature Transform)**
+- Feature-based matching with brand guideline validation
+- Validates: Safe Zone (30px min), aspect ratio (1.0-8.0), max size (25% of frame)
+- Best for: High accuracy with structural constraints
+
+**ORB (Oriented FAST and Rotated BRIEF)**
+- Fast binary descriptor matching
+- Lowe's ratio test + RANSAC with homography validation
+- Best for: Real-time performance
+
+**Color-based Detector**
+- Segments official Neurons brand colors (Tulip, Bright Sun, French Sky Blue, Lavender, Dark Indigo)
+- HSV color space analysis with morphological operations
+- Best for: Logos with distinctive colors
+
+**Edge-based Detector**
+- Canny edge detection with Gaussian blur to reduce background noise
+- Template matching on contours
+- Best for: Logos with clear edges
+
+**Hybrid Detector**
+- Combines color + edge detection with intelligent fusion
+- Filters detections by size, aspect ratio, confidence, and spatial coherence
+- Merges nearby detections with validation against brand guidelines
+- Best for: Maximum accuracy on complex/textured backgrounds
 
 ## 🧪 Test Coverage
 
@@ -197,11 +228,11 @@ docker compose down
 ### Using the API
 
 ```bash
-# Test with curl
+# Test with curl (hybrid detector for textured backgrounds)
 curl -X POST "http://localhost:8000/detect" \
   -F "video=@video.mp4" \
   -F "logo=@logo.jpg" \
-  -F "detector=orb"
+  -F "detector=hybrid"
 
 # Check job status
 curl "http://localhost:8000/status/{job_id}"
@@ -220,7 +251,7 @@ with open('video.mp4', 'rb') as video, open('logo.jpg', 'rb') as logo:
     response = requests.post(
         'http://localhost:8000/detect',
         files={'video': video, 'logo': logo},
-        params={'detector': 'orb'}
+        params={'detector': 'hybrid'}  # or 'sift', 'orb', 'color_based', 'edge_based'
     )
 
 job_id = response.json()['job_id']

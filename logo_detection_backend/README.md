@@ -1,7 +1,7 @@
 # Logo Detection Backend
 
 ## Overview
-Simple FastAPI backend for logo detection in videos using multiple computer vision algorithms.
+FastAPI backend for logo detection in videos using multiple computer vision algorithms (SIFT, ORB, Color-based, Edge-based, Hybrid).
 
 ## Project Structure
 
@@ -10,7 +10,7 @@ logo_detection_backend/
 ├── app/
 │   ├── main.py                  # FastAPI app with all endpoints
 │   ├── models.py                # Pydantic schemas
-│   └── detectors.py             # Logo detectors (SIFT, ORB, BRISK, AKAZE)
+│   └── detectors.py             # Logo detectors (SIFT, ORB, Color, Edge, Hybrid)
 ├── tests/                       # Unit tests (pytest)
 │   ├── conftest.py              # Common fixtures
 │   ├── test_models.py           # Pydantic model tests
@@ -49,8 +49,8 @@ pip install -r requirements.txt
 # 2. Start server
 python run.py
 
-# 3. Test with ORB (recommended)
-python test.py ../Video_1.mp4 neurons_logo.jpg --detector orb
+# 3. Test with Hybrid (recommended for textured backgrounds)
+python test.py ../Video_1.mp4 neurons_logo.jpg --detector hybrid
 
 # 4. Benchmark all detectors
 python test_benchmark.py ../Video_1.mp4 neurons_logo.jpg
@@ -85,7 +85,7 @@ docker compose logs -f logo-detection-backend
 ### Logo Detection
 - **`POST /detect`** - Detect logo in video
   - Parameters: `video` (file), `logo` (file), `detector` (string)
-  - Available detectors: `sift`, `orb`, `brisk`, `akaze`
+  - Available detectors: `sift`, `orb`, `color_based`, `edge_based`, `hybrid`
   - Returns: `job_id` for async tracking
 
 ### Job Tracking
@@ -141,12 +141,13 @@ open htmlcov/index.html
 # See available models
 python test.py ../Video_1.mp4 neurons_logo.jpg --models
 
-# Test with ORB (default)
-python test.py ../Video_1.mp4 neurons_logo.jpg
+# Test with Hybrid (default, best for textured backgrounds)
+python test.py ../Video_1.mp4 neurons_logo.jpg --detector hybrid
 
 # Test with different detectors
-python test.py ../Video_1.mp4 neurons_logo.jpg --detector brisk
 python test.py ../Video_1.mp4 neurons_logo.jpg --detector sift
+python test.py ../Video_1.mp4 neurons_logo.jpg --detector color_based
+python test.py ../Video_1.mp4 neurons_logo.jpg --detector edge_based
 ```
 
 #### Complete Benchmark
@@ -177,10 +178,10 @@ python test_benchmark.py ../Video_1.mp4 neurons_logo.jpg --sample-frames 100
 
 ## Key Points
 
-1. **Methodical approach**: Tested 4 different algorithms with benchmark
-2. **ORB winner**: 9x more detections than SIFT, 8x faster
-3. **Flexible architecture**: Detector choice via API
-4. **Validated performance**: Real data on actual videos
-5. **Maintainable code**: Unified and extensible structure
-6. **Complete unit tests**: 100+ tests with pytest (models, detectors, API)
-7. **Code coverage**: 50%+ with detailed reports
+1. **Multiple detection strategies**: 5 different algorithms (SIFT, ORB, Color-based, Edge-based, Hybrid)
+2. **Hybrid detector**: Combines color + edge detection for maximum accuracy on textured backgrounds
+3. **Brand guideline validation**: SIFT detector includes structural validation (Safe Zone, aspect ratio)
+4. **Flexible architecture**: Detector choice via API
+5. **Optimized for Neurons logo**: Color ranges based on official brand colors
+6. **Maintainable code**: Unified and extensible detector architecture
+7. **Complete unit tests**: Comprehensive test coverage with pytest
