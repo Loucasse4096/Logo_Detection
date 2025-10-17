@@ -301,11 +301,11 @@ async def list_models():
             "best_for": "Complex backgrounds, maximum accuracy"
         },
         "template_matching": {
-            "name": "Template Matching",
-            "description": "Classic template matching with multi-scale support",
+            "name": "Template Matching (Optimized)",
+            "description": "Fast template matching with pyramid matching and optimized NMS",
             "robust_to": ["scale", "clean_backgrounds"],
-            "speed": "fast",
-            "best_for": "Clean backgrounds, exact logo matches"
+            "speed": "very_fast",
+            "best_for": "Clean backgrounds, exact logo matches, high performance"
         },
     }
     

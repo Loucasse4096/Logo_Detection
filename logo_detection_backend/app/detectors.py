@@ -348,7 +348,7 @@ class ORBDetector(BaseDetector):
 class ColorBasedDetector(BaseDetector):
     """Detector based on segmentation of distinctive logo colors"""
     
-    def __init__(self, logo_path: str, color_threshold: float = 0.2, min_area: int = 50):
+    def __init__(self, logo_path: str, color_threshold: float = 0.15, min_area: int = 100):
         self.color_threshold = color_threshold
         self.min_area = min_area
         
@@ -407,13 +407,13 @@ class ColorBasedDetector(BaseDetector):
             combined_mask = cv2.bitwise_or(combined_mask, mask)
         
         # Nettoyer le masque avec des opérations morphologiques plus agressives
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
         
         # Dilatation pour connecter les parties du logo
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        combined_mask = cv2.dilate(combined_mask, kernel_dilate, iterations=1)
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        combined_mask = cv2.dilate(combined_mask, kernel_dilate, iterations=2)
         
         return combined_mask
     
@@ -433,13 +433,15 @@ class ColorBasedDetector(BaseDetector):
             
             # Filter by aspect ratio (logo approximately rectangular)
             aspect_ratio = w / h
-            if 0.5 < aspect_ratio < 3.0:  # Logo can be wider than tall
+            if 0.3 < aspect_ratio < 5.0:  # Logo can be wider than tall (more flexible)
                 # Calculate logo pixel density in this region
                 roi_mask = mask[y:y+h, x:x+w]
                 density = np.sum(roi_mask > 0) / (w * h)
                 
                 if density > self.color_threshold:
-                    confidence = min(density * 2, 1.0)  # Normalize confidence
+                    # Boost confidence for larger detections
+                    size_boost = min(1.0, (w * h) / 1000.0)  # Boost for larger areas
+                    confidence = min(density * 2 * (1 + size_boost), 1.0)
                     candidates.append((x, y, w, h, confidence))
         
         return candidates
@@ -906,12 +908,13 @@ class HybridDetector(BaseDetector):
 
 
 class TemplateMatchingDetector(BaseDetector):
-    """Simple template matching detector using OpenCV's matchTemplate"""
+    """Optimized template matching detector using OpenCV's matchTemplate with pyramid matching"""
     
-    def __init__(self, logo_path: str, threshold: float = 0.7, scale_range: tuple = (0.5, 2.0), scale_steps: int = 10):
+    def __init__(self, logo_path: str, threshold: float = 0.7, scale_range: tuple = (0.5, 2.0), scale_steps: int = 5, use_pyramid: bool = True):
         self.threshold = threshold
         self.scale_range = scale_range
         self.scale_steps = scale_steps
+        self.use_pyramid = use_pyramid
         super().__init__(logo_path)
     
     def _load_template(self):
@@ -931,28 +934,56 @@ class TemplateMatchingDetector(BaseDetector):
             raise
     
     def detect_in_frame(self, frame: np.ndarray, frame_number: int = 0, total_frames: int = 0) -> List[Tuple[int, int, int, int, float]]:
-        """Template matching detection with multi-scale support"""
+        """Optimized template matching with pyramid matching for speed"""
         try:
-            detections = []
-            
-            # Generate scale factors
-            scale_factors = np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps)
+            if self.use_pyramid:
+                return self._pyramid_matching(frame, frame_number)
+            else:
+                return self._standard_matching(frame, frame_number)
+                
+        except Exception as e:
+            logger.warning(f"TemplateMatching detection error: {e}")
+            return []
+    
+    def _pyramid_matching(self, frame: np.ndarray, frame_number: int) -> List[Tuple[int, int, int, int, float]]:
+        """Fast pyramid-based template matching"""
+        detections = []
+        
+        # Create image pyramid (reduce resolution for faster matching)
+        pyramid_levels = 2  # Use 2 levels: original + 0.5x
+        frame_pyramid = [frame]
+        
+        # Create downsampled frame for faster initial matching
+        if frame.shape[0] > 800 or frame.shape[1] > 800:
+            small_frame = cv2.resize(frame, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+            frame_pyramid.append(small_frame)
+        
+        # Generate fewer, more strategic scale factors
+        scale_factors = np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps)
+        
+        for level, current_frame in enumerate(frame_pyramid):
+            scale_factor = 0.5 ** level  # 1.0 for original, 0.5 for downsampled
             
             for scale in scale_factors:
+                # Skip very small scales on downsampled images
+                if level > 0 and scale < 0.8:
+                    continue
+                
                 # Resize template
                 new_width = int(self.template_width * scale)
                 new_height = int(self.template_height * scale)
                 
                 # Skip if template becomes too small or too large
-                if new_width < 20 or new_height < 20:
+                if new_width < 15 or new_height < 15:
                     continue
-                if new_width > frame.shape[1] or new_height > frame.shape[0]:
+                if new_width > current_frame.shape[1] or new_height > current_frame.shape[0]:
                     continue
                 
-                resized_template = cv2.resize(self.template, (new_width, new_height))
+                # Use faster interpolation for template resizing
+                resized_template = cv2.resize(self.template, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
                 
                 # Perform template matching
-                result = cv2.matchTemplate(frame, resized_template, cv2.TM_CCOEFF_NORMED)
+                result = cv2.matchTemplate(current_frame, resized_template, cv2.TM_CCOEFF_NORMED)
                 
                 # Find locations where matching exceeds threshold
                 locations = np.where(result >= self.threshold)
@@ -961,35 +992,93 @@ class TemplateMatchingDetector(BaseDetector):
                 matches = list(zip(*locations[::-1]))  # Switch x and y coordinates
                 
                 for (x, y) in matches:
-                    confidence = result[y, x]
+                    confidence = float(result[y, x])
                     
-                    # Check for overlap with existing detections
+                    # Scale coordinates back to original frame size
+                    if level > 0:
+                        x = int(x * 2)
+                        y = int(y * 2)
+                        new_width = int(new_width * 2)
+                        new_height = int(new_height * 2)
+                    
+                    # Quick overlap check (simplified)
                     overlap = False
                     for existing_x, existing_y, existing_w, existing_h, _ in detections:
-                        # Calculate IoU
-                        iou = self._calculate_iou(
-                            (x, y, new_width, new_height),
-                            (existing_x, existing_y, existing_w, existing_h)
-                        )
-                        if iou > 0.3:  # 30% overlap threshold
+                        # Simple distance check to avoid overflow
+                        dx = abs(x - existing_x)
+                        dy = abs(y - existing_y)
+                        max_w = max(new_width, existing_w)
+                        max_h = max(new_height, existing_h)
+                        if dx < max_w // 2 and dy < max_h // 2:
                             overlap = True
                             break
                     
                     if not overlap:
                         detections.append((x, y, new_width, new_height, confidence))
+        
+        # Apply fast non-maximum suppression
+        final_detections = self._fast_nms(detections)
+        
+        if final_detections:
+            logger.info(f"TemplateMatching (pyramid) found {len(final_detections)} detections in frame {frame_number}")
+        
+        return final_detections
+    
+    def _standard_matching(self, frame: np.ndarray, frame_number: int) -> List[Tuple[int, int, int, int, float]]:
+        """Standard template matching (fallback)"""
+        detections = []
+        
+        # Generate scale factors
+        scale_factors = np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps)
+        
+        for scale in scale_factors:
+            # Resize template
+            new_width = int(self.template_width * scale)
+            new_height = int(self.template_height * scale)
             
-            # Sort by confidence and apply non-maximum suppression
-            detections = sorted(detections, key=lambda x: x[4], reverse=True)
-            final_detections = self._non_maximum_suppression(detections)
+            # Skip if template becomes too small or too large
+            if new_width < 20 or new_height < 20:
+                continue
+            if new_width > frame.shape[1] or new_height > frame.shape[0]:
+                continue
             
-            if final_detections:
-                logger.info(f"TemplateMatching found {len(final_detections)} detections in frame {frame_number}")
+            resized_template = cv2.resize(self.template, (new_width, new_height))
             
-            return final_detections
+            # Perform template matching
+            result = cv2.matchTemplate(frame, resized_template, cv2.TM_CCOEFF_NORMED)
             
-        except Exception as e:
-            logger.warning(f"TemplateMatching detection error: {e}")
-            return []
+            # Find locations where matching exceeds threshold
+            locations = np.where(result >= self.threshold)
+            
+            # Convert to list of (x, y) coordinates
+            matches = list(zip(*locations[::-1]))  # Switch x and y coordinates
+            
+            for (x, y) in matches:
+                confidence = float(result[y, x])
+                
+                # Check for overlap with existing detections
+                overlap = False
+                for existing_x, existing_y, existing_w, existing_h, _ in detections:
+                    # Calculate IoU
+                    iou = self._calculate_iou(
+                        (x, y, new_width, new_height),
+                        (existing_x, existing_y, existing_w, existing_h)
+                    )
+                    if iou > 0.3:  # 30% overlap threshold
+                        overlap = True
+                        break
+                
+                if not overlap:
+                    detections.append((x, y, new_width, new_height, confidence))
+        
+        # Sort by confidence and apply non-maximum suppression
+        detections = sorted(detections, key=lambda x: x[4], reverse=True)
+        final_detections = self._non_maximum_suppression(detections)
+        
+        if final_detections:
+            logger.info(f"TemplateMatching (standard) found {len(final_detections)} detections in frame {frame_number}")
+        
+        return final_detections
     
     def _calculate_iou(self, box1, box2):
         """Calculate Intersection over Union (IoU) between two bounding boxes"""
@@ -1012,6 +1101,44 @@ class TemplateMatchingDetector(BaseDetector):
         union = w1 * h1 + w2 * h2 - intersection
         
         return intersection / union if union > 0 else 0.0
+    
+    def _fast_nms(self, detections, overlap_threshold=0.3):
+        """Fast non-maximum suppression using distance-based filtering"""
+        if not detections:
+            return []
+        
+        # Sort by confidence
+        detections = sorted(detections, key=lambda x: x[4], reverse=True)
+        
+        final_detections = []
+        used = set()
+        
+        for i, det in enumerate(detections):
+            if i in used:
+                continue
+            
+            final_detections.append(det)
+            used.add(i)
+            
+            # Fast distance-based overlap check
+            x1, y1, w1, h1 = det[:4]
+            center1 = (x1 + w1/2, y1 + h1/2)
+            
+            for j, other_det in enumerate(detections):
+                if j in used:
+                    continue
+                
+                x2, y2, w2, h2 = other_det[:4]
+                center2 = (x2 + w2/2, y2 + h2/2)
+                
+                # Quick distance check (much faster than IoU)
+                distance = ((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)**0.5
+                min_distance = min(w1, h1, w2, h2) * 0.5
+                
+                if distance < min_distance:
+                    used.add(j)
+        
+        return final_detections
     
     def _non_maximum_suppression(self, detections, overlap_threshold=0.3):
         """Apply non-maximum suppression to remove overlapping detections"""
