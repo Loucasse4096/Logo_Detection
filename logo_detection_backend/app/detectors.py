@@ -164,26 +164,6 @@ class SIFTDetector(BaseDetector):
             logger.error(f"Failed to load SIFT template: {e}")
             raise
     
-    def _validate_neurons_structure(self, width, height, frame_shape):
-        """Validate structure according to brand guidelines"""
-        frame_height, frame_width = frame_shape[:2]
-        frame_area = frame_width * frame_height
-        detection_area = width * height
-        
-        # Safe Zone minimum 30px according to guidelines
-        if width < 30 or height < 30:
-            return False
-        
-        # Maximum size 25% of the image
-        if detection_area > frame_area * 0.25:
-            return False
-        
-        # Aspect ratio for neurons logo (wider than tall)
-        aspect_ratio = width / height
-        if aspect_ratio < 1.0 or aspect_ratio > 8:
-            return False
-        
-        return True
     
     def detect_in_frame(self, frame: np.ndarray, frame_number: int = 0, total_frames: int = 0) -> List[Tuple[int, int, int, int, float]]:
         """SIFT detection"""
@@ -233,15 +213,10 @@ class SIFTDetector(BaseDetector):
             width = x_max - x_min
             height = y_max - y_min
             
-            # Validation according to brand guidelines (structure only)
-            if not self._validate_neurons_structure(width, height, frame.shape):
-                logger.debug("SIFT: Detection rejected (invalid structure)")
-            return []
-
             confidence = len(good_matches) / len(self.template_kp)
             
             logger.info(f"SIFT found valid neurons logo with {len(good_matches)} matches, confidence {confidence:.3f}")
-                return [(x_min, y_min, width, height, confidence)]
+            return [(x_min, y_min, width, height, confidence)]
             
         except Exception as e:
             logger.warning(f"SIFT detection error: {e}")
