@@ -153,7 +153,7 @@ async def detect_logo(
     
     - Returns immediately with job_id
     - Processing happens in background
-    - detector parameter: sift, orb, color_based, edge_based, hybrid
+    - detector parameter: sift, orb, color_based, edge_based, hybrid, template_matching
     """
     # Validate detector
     available_detectors = get_available_detectors()
@@ -300,6 +300,13 @@ async def list_models():
             "speed": "moderate",
             "best_for": "Complex backgrounds, maximum accuracy"
         },
+        "template_matching": {
+            "name": "Template Matching",
+            "description": "Classic template matching with multi-scale support",
+            "robust_to": ["scale", "clean_backgrounds"],
+            "speed": "fast",
+            "best_for": "Clean backgrounds, exact logo matches"
+        },
     }
     
     models = []
@@ -314,7 +321,7 @@ async def list_models():
         "models": models,
         "default": "hybrid",  # Hybrid is best for textured backgrounds
         "recommended_for_textured_backgrounds": ["sift", "hybrid", "color_based", "edge_based"],
-        "recommended_for_clean_backgrounds": ["sift", "orb"],
+        "recommended_for_clean_backgrounds": ["sift", "orb", "template_matching"],
         "total_available": len(models)
     }
 

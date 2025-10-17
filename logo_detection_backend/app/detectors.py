@@ -905,6 +905,144 @@ class HybridDetector(BaseDetector):
         return True
 
 
+class TemplateMatchingDetector(BaseDetector):
+    """Simple template matching detector using OpenCV's matchTemplate"""
+    
+    def __init__(self, logo_path: str, threshold: float = 0.7, scale_range: tuple = (0.5, 2.0), scale_steps: int = 10):
+        self.threshold = threshold
+        self.scale_range = scale_range
+        self.scale_steps = scale_steps
+        super().__init__(logo_path)
+    
+    def _load_template(self):
+        """Load template for matching"""
+        try:
+            logo_img = cv2.imread(str(self.logo_path), cv2.IMREAD_COLOR)
+            if logo_img is None:
+                raise ValueError(f"Cannot load logo from {self.logo_path}")
+            
+            self.template = logo_img
+            self.template_height, self.template_width = logo_img.shape[:2]
+            
+            logger.info(f"Loaded TemplateMatching template: {self.template_width}x{self.template_height}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load TemplateMatching template: {e}")
+            raise
+    
+    def detect_in_frame(self, frame: np.ndarray, frame_number: int = 0, total_frames: int = 0) -> List[Tuple[int, int, int, int, float]]:
+        """Template matching detection with multi-scale support"""
+        try:
+            detections = []
+            
+            # Generate scale factors
+            scale_factors = np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps)
+            
+            for scale in scale_factors:
+                # Resize template
+                new_width = int(self.template_width * scale)
+                new_height = int(self.template_height * scale)
+                
+                # Skip if template becomes too small or too large
+                if new_width < 20 or new_height < 20:
+                    continue
+                if new_width > frame.shape[1] or new_height > frame.shape[0]:
+                    continue
+                
+                resized_template = cv2.resize(self.template, (new_width, new_height))
+                
+                # Perform template matching
+                result = cv2.matchTemplate(frame, resized_template, cv2.TM_CCOEFF_NORMED)
+                
+                # Find locations where matching exceeds threshold
+                locations = np.where(result >= self.threshold)
+                
+                # Convert to list of (x, y) coordinates
+                matches = list(zip(*locations[::-1]))  # Switch x and y coordinates
+                
+                for (x, y) in matches:
+                    confidence = result[y, x]
+                    
+                    # Check for overlap with existing detections
+                    overlap = False
+                    for existing_x, existing_y, existing_w, existing_h, _ in detections:
+                        # Calculate IoU
+                        iou = self._calculate_iou(
+                            (x, y, new_width, new_height),
+                            (existing_x, existing_y, existing_w, existing_h)
+                        )
+                        if iou > 0.3:  # 30% overlap threshold
+                            overlap = True
+                            break
+                    
+                    if not overlap:
+                        detections.append((x, y, new_width, new_height, confidence))
+            
+            # Sort by confidence and apply non-maximum suppression
+            detections = sorted(detections, key=lambda x: x[4], reverse=True)
+            final_detections = self._non_maximum_suppression(detections)
+            
+            if final_detections:
+                logger.info(f"TemplateMatching found {len(final_detections)} detections in frame {frame_number}")
+            
+            return final_detections
+            
+        except Exception as e:
+            logger.warning(f"TemplateMatching detection error: {e}")
+            return []
+    
+    def _calculate_iou(self, box1, box2):
+        """Calculate Intersection over Union (IoU) between two bounding boxes"""
+        x1_1, y1_1, w1, h1 = box1
+        x2_1, y2_1 = x1_1 + w1, y1_1 + h1
+        
+        x1_2, y1_2, w2, h2 = box2
+        x2_2, y2_2 = x1_2 + w2, y1_2 + h2
+        
+        # Calculate intersection
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return 0.0
+        
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        union = w1 * h1 + w2 * h2 - intersection
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def _non_maximum_suppression(self, detections, overlap_threshold=0.3):
+        """Apply non-maximum suppression to remove overlapping detections"""
+        if not detections:
+            return []
+        
+        # Sort by confidence
+        detections = sorted(detections, key=lambda x: x[4], reverse=True)
+        
+        final_detections = []
+        used = set()
+        
+        for i, det in enumerate(detections):
+            if i in used:
+                continue
+            
+            final_detections.append(det)
+            used.add(i)
+            
+            # Mark overlapping detections as used
+            for j, other_det in enumerate(detections):
+                if j in used:
+                    continue
+                
+                iou = self._calculate_iou(det[:4], other_det[:4])
+                if iou > overlap_threshold:
+                    used.add(j)
+        
+        return final_detections
+
+
 # Factory to create detectors
 def create_detector(detector_type: str, logo_path: str, **kwargs):
     """Factory to create detectors"""
@@ -913,7 +1051,8 @@ def create_detector(detector_type: str, logo_path: str, **kwargs):
         "orb": ORBDetector,
         "color_based": ColorBasedDetector,
         "edge_based": EdgeBasedDetector,
-        "hybrid": HybridDetector
+        "hybrid": HybridDetector,
+        "template_matching": TemplateMatchingDetector
     }
     
     if detector_type not in detectors:
@@ -936,7 +1075,8 @@ def get_available_detectors():
         "orb": ORBDetector,
         "color_based": ColorBasedDetector,
         "edge_based": EdgeBasedDetector,
-        "hybrid": HybridDetector
+        "hybrid": HybridDetector,
+        "template_matching": TemplateMatchingDetector
     }
     
     for name, detector_class in detectors_to_test.items():
